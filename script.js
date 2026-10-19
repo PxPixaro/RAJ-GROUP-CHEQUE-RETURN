@@ -7,18 +7,31 @@ const GOOGLE_SPREADSHEET_ID = '1MimGbYNBqVbDLOxC7TIVv8IQImNCPkxSgnmjq94NxnQ';
 // IMPORTANT: Spreadsheet edit URL is NOT the Apps Script Web App URL.
 // After deploying Code.gs as a Web App, paste its https://script.google.com/macros/s/.../exec URL here.
 const APPS_SCRIPT_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxPz7JVwEJ6LUanBi5554wJ0amRrGLYlcP6VQgas0YvK1Zditxq-oJvVQwdW1NNT_9t/exec';
-// GitHub frontend -> embedded Google Apps Script bridge -> Sheets/Drive.
-const BRIDGE_CHANNEL='raj-cheque-v5';
+// V6.1: Google Apps Script HtmlService can run INSIDE a nested googleusercontent.com
+// sandbox iframe. postMessage to the outer /exec iframe never reaches that child.
+// Bridge.html announces itself to window.top; communicate with the actual source.
+const BRIDGE_CHANNEL='raj-cheque-v6.1';
 let bridgeFrame=null, bridgeReady=null, bridgeResolve=null;
+let bridgePeer=null, bridgeOrigin='';
 const requests=new Map();
+const isGoogleScriptOrigin=origin=>/^https:\/\/(?:[a-z0-9-]+\.)*googleusercontent\.com$/i.test(origin)||origin==='https://script.google.com';
 window.addEventListener('message',event=>{
- if(!bridgeFrame || event.source!==bridgeFrame.contentWindow)return;
- // The Apps Script HTML sandbox uses a googleusercontent.com origin.
- if(!/^https:\/\/[a-z0-9.-]*googleusercontent\.com$/i.test(event.origin) && !/^https:\/\/script\.google\.com$/i.test(event.origin))return;
+ if(!bridgeFrame || !isGoogleScriptOrigin(event.origin))return;
  const m=event.data;
  if(!m||m.channel!==BRIDGE_CHANNEL)return;
- if(m.type==='ready'){if(bridgeResolve){bridgeResolve();bridgeResolve=null;}return;}
- if(m.type==='response'&&requests.has(m.id)){const q=requests.get(m.id);requests.delete(m.id);clearTimeout(q.timer);if(m.ok)q.resolve(m.data);else q.reject(new Error(m.error||'Apps Script error'));}
+ if(m.type==='ready'){
+  if(!event.source)return;
+  bridgePeer=event.source;bridgeOrigin=event.origin;
+  try{bridgePeer.postMessage({channel:BRIDGE_CHANNEL,type:'ack'},bridgeOrigin)}catch(e){}
+  if(bridgeResolve){bridgeResolve();bridgeResolve=null;}
+  return;
+ }
+ // Only the confirmed frame may answer requests.
+ if(event.source!==bridgePeer||event.origin!==bridgeOrigin)return;
+ if(m.type==='response'&&requests.has(m.id)){
+  const q=requests.get(m.id);requests.delete(m.id);clearTimeout(q.timer);
+  if(m.ok)q.resolve(m.data);else q.reject(new Error(m.error||'Apps Script error'));
+ }
 });
 function ensureBridge(){
  if(bridgeReady)return bridgeReady;
@@ -27,20 +40,29 @@ function ensureBridge(){
  bridgeFrame.title='Google Sheets connection';bridgeFrame.style.cssText='position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;border:0';
  document.body.appendChild(bridgeFrame);
  bridgeReady=new Promise((resolve,reject)=>{
-  bridgeResolve=resolve;
-  const timer=setInterval(()=>{try{bridgeFrame.contentWindow.postMessage({channel:BRIDGE_CHANNEL,type:'ping'},'*')}catch(e){}},700);
-  setTimeout(()=>{clearInterval(timer);if(bridgeResolve){bridgeResolve=null;bridgeReady=null;reject(Error('Apps Script connection timeout. Check web app access / Bridge.html allowlist / browser third-party cookies.'));}},25000);
-  const original=bridgeResolve;bridgeResolve=()=>{clearInterval(timer);original()};
+  const timer=setInterval(()=>{
+   // Fallback for flat iframe deployments. In Google's nested sandbox, the
+   // inner Bridge.html sends 'ready' proactively to window.top instead.
+   try{bridgeFrame?.contentWindow?.postMessage({channel:BRIDGE_CHANNEL,type:'ping'},'*')}catch(e){}
+  },700);
+  const timeout=setTimeout(()=>{
+   clearInterval(timer);bridgeResolve=null;bridgeReady=null;bridgePeer=null;bridgeOrigin='';
+   if(bridgeFrame){bridgeFrame.remove();bridgeFrame=null;}
+   reject(Error('Apps Script Bridge timeout. Code.gs aur Bridge.html dono update karke New version Deploy karein. Web app: Execute as Me / Access Anyone. Browser third-party cookies bhi check karein.'));
+  },25000);
+  bridgeResolve=()=>{clearInterval(timer);clearTimeout(timeout);resolve();};
  });
  return bridgeReady;
 }
 function api(action,args=[]){
- if(!authToken) return Promise.reject(Error('Please sign in'));
+ if(!authToken)return Promise.reject(Error('Please sign in'));
  return ensureBridge().then(()=>new Promise((resolve,reject)=>{
-  let id=Date.now()+'-'+Math.random().toString(36).slice(2);
-  const timer=setTimeout(()=>{requests.delete(id);reject(Error('Google Apps Script request timed out'))},90000);
+  if(!bridgePeer)return reject(Error('Apps Script Bridge connected nahi hai. Refresh karein.'));
+  const id=Date.now()+'-'+Math.random().toString(36).slice(2);
+  const timer=setTimeout(()=>{requests.delete(id);reject(Error('Google Apps Script request timed out: '+action))},90000);
   requests.set(id,{resolve,reject,timer});
-  bridgeFrame.contentWindow.postMessage({channel:BRIDGE_CHANNEL,type:'request',id,action,args},'*');
+  try{bridgePeer.postMessage({channel:BRIDGE_CHANNEL,type:'request',id,action,args},bridgeOrigin)}
+  catch(e){clearTimeout(timer);requests.delete(id);reject(e)}
  }));
 }
 
@@ -63,7 +85,7 @@ function showLogin(){
 function showLoggedIn(){
  document.getElementById('loginPanel').style.display='none';
  document.getElementById('logoutButton').style.display='inline-block';
- document.getElementById('connectionState').textContent='● Logged in · Google Sheets backend';
+ document.getElementById('connectionState').textContent='● Logged in · Connecting to Google Sheets…';
 }
 document.getElementById('loginForm').addEventListener('submit',async e=>{
  e.preventDefault();const input=document.getElementById('loginPassword');const error=document.getElementById('loginError');
@@ -111,10 +133,10 @@ function autoCity(){ $('city').value=detectCity($('party').value) }
 function money(n){return '₹'+Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:2,minimumFractionDigits:2})}
 function sanitize(text){return String(text??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function showBanner(){const el=$('banner');el.className='notice'+(HOSTED?'':' warn');el.textContent=HOSTED?'🟢 Google Apps Script mode — entries are saved in connected Google Sheet.':'🟡 BROWSER-ONLY MODE — Password is just a screen lock. Records are saved ONLY in this browser, NOT Google Sheets. Do not enter sensitive/live cheque details.'}
-async function load(){let key=++loadIndex;$('selYear').textContent=$('listYear').textContent=currentYear();$('saveStatus').textContent='Loading...';try{if(HOSTED){let data=await server('getBootstrap',currentYear());if(key!==loadIndex)return;records=data.records||[];if(data.masters)masters=data.masters}else{records=JSON.parse(localStorage.getItem(localKey())||'[]');masters=JSON.parse(localStorage.getItem('rajgroup-masters')||'null')||JSON.parse(JSON.stringify(DEFAULTS))}page=1;render();$('saveStatus').textContent='Google Sheet connected';$('banner').className='notice';$('banner').textContent='🟢 Google Sheets connected — data saving enabled. (Simple login is not a security barrier.)';}catch(e){$('saveStatus').textContent='Error: '+e.message;$('banner').className='notice warn';$('banner').textContent='Connection failed: '+e.message;toast(e.message)}}
+async function load(){let key=++loadIndex;$('selYear').textContent=$('listYear').textContent=currentYear();$('saveStatus').textContent='Loading...';try{if(HOSTED){let data=await server('getBootstrap',currentYear());if(key!==loadIndex)return;if(data.backendVersion!=='6.1')throw Error('Google Apps Script Code.gs purana hai. Backend V6.1 code paste karke New version Deploy karein.');records=data.records||[];if(data.masters)masters=data.masters}else{records=JSON.parse(localStorage.getItem(localKey())||'[]');masters=JSON.parse(localStorage.getItem('rajgroup-masters')||'null')||JSON.parse(JSON.stringify(DEFAULTS))}page=1;render();$('saveStatus').textContent='Google Sheet connected';$('connectionState').textContent='● Google Sheets connected';$('banner').className='notice';$('banner').textContent='🟢 Google Sheets connected — data saving enabled. (Simple login is not a security barrier.)';}catch(e){$('saveStatus').textContent='Error: '+e.message;$('connectionState').textContent='● Sheets connection failed';$('banner').className='notice warn';$('banner').textContent='Connection failed: '+e.message;toast(e.message)}}
 function filtered(){const q=norm($('filter').value);if(!q)return records;return records.filter(r=>['chequeDate','returnDate','bankDate','party','city','chequeNo','amount','reason','division','mh','inHand','inHandDate','legalRemark','entryDate'].some(k=>norm(r[k]).includes(q)))}
 function render(){let arr=filtered(),sum=records.reduce((a,r)=>a+(Number(r.amount)||0),0);$('count').textContent=records.length.toLocaleString('en-IN');$('sum').textContent=money(sum);const pages=Math.max(1,Math.ceil(arr.length/limit));page=Math.min(page,pages);let view=arr.slice((page-1)*limit,page*limit);$('shown').textContent=arr.length+' visible of '+records.length+' records';$('pageInfo').textContent='Page '+page+' / '+pages;$('prevBtn').disabled=page<=1;$('nextBtn').disabled=page>=pages;
- $('rows').innerHTML=view.length?view.map(r=>`<tr><td>${sanitize(r.chequeDate)}</td><td>${sanitize(r.returnDate)}</td><td>${sanitize(r.bankDate)}</td><td><b>${sanitize(r.party)}</b></td><td>${sanitize(r.city)}</td><td>${sanitize(r.chequeNo)}</td><td class="num">${money(r.amount)}</td><td>${sanitize(r.reason)}</td><td>${sanitize(r.division)}</td><td>${sanitize(r.mh)}</td><td>${sanitize(r.inHand)}</td><td>${sanitize(r.inHandDate)}</td><td>${sanitize(r.legalRemark)}</td><td>${sanitize(r.entryDate||'—')}</td><td>${r.imageId?`<button class="rowbtn" data-act="view" data-id="${sanitize(r.id)}">👁 View Image</button>`:'—'}</td><td style="white-space:nowrap"><button class="rowbtn" data-act="edit" data-id="${sanitize(r.id)}">Edit</button> <button class="rowbtn red" data-act="delete" data-id="${sanitize(r.id)}">Delete</button></td></tr>`).join(''):'<tr><td class="empty" colspan="10">No matching entries. Use the entry form above.</td></tr>'}
+ $('rows').innerHTML=view.length?view.map(r=>`<tr><td>${sanitize(r.chequeDate)}</td><td>${sanitize(r.returnDate)}</td><td>${sanitize(r.bankDate)}</td><td><b>${sanitize(r.party)}</b></td><td>${sanitize(r.city)}</td><td>${sanitize(r.chequeNo)}</td><td class="num">${money(r.amount)}</td><td>${sanitize(r.reason)}</td><td>${sanitize(r.division)}</td><td>${sanitize(r.mh)}</td><td>${sanitize(r.inHand)}</td><td>${sanitize(r.inHandDate)}</td><td>${sanitize(r.legalRemark)}</td><td>${sanitize(r.entryDate||'—')}</td><td>${r.imageId?`<button class="rowbtn" data-act="view" data-id="${sanitize(r.id)}">👁 View Image</button>`:'—'}</td><td style="white-space:nowrap"><button class="rowbtn" data-act="edit" data-id="${sanitize(r.id)}">Edit</button> <button class="rowbtn red" data-act="delete" data-id="${sanitize(r.id)}">Delete</button></td></tr>`).join(''):'<tr><td class="empty" colspan="16">No matching entries. Use the entry form above.</td></tr>'}
 function resetForm(){$('entry').reset();editingId='';if(!dateFormat($('entryDate').value))$('entryDate').value=todayDate();$('attachedInfo').textContent='';$('formTitle').textContent='✦ New Cheque Return Entry';$('saveBtn').textContent='✚ Save Entry';$('chequeDate').focus()}
 function getForm(){return Object.fromEntries(ids.map(k=>[k,$(k).value.trim()]))}
 function persistLocal(){localStorage.setItem(localKey(),JSON.stringify(records))}
@@ -130,7 +152,7 @@ $('entry').addEventListener('submit',async e=>{e.preventDefault();let r=getForm(
 $('rows').addEventListener('click',async e=>{const b=e.target.closest('button[data-act]');if(!b)return;let r=records.find(x=>x.id===b.dataset.id);if(!r)return;if(b.dataset.act==='view'){await openImage(r);return}if(b.dataset.act==='edit'){editingId=r.id;ids.forEach(k=>$(k).value=r[k]??'');$('entryDate').value=r.entryDate||todayDate();$('chequeImage').value='';$('attachedInfo').textContent=r.imageId?'Existing image attached; select a file to replace it.':'';$('formTitle').textContent='✎ Edit Cheque Return Entry';$('saveBtn').textContent='✓ Update Entry';window.scrollTo({top:0,behavior:'smooth'});$('party').focus();return}if(!confirm('Is cheque return record ko permanently DELETE karna hai?'))return;try{if(HOSTED)await server('deleteRecord',currentYear(),r.id);records=records.filter(x=>x.id!==r.id);if(!HOSTED)persistLocal();render();toast('Entry deleted')}catch(err){toast('Delete failed: '+err.message)}});
 $('resetBtn').onclick=resetForm;$('year').onchange=()=>{resetForm();$('filter').value='';load()};$('filter').oninput=()=>{page=1;render()};$('prevBtn').onclick=()=>{page--;render()};$('nextBtn').onclick=()=>{page++;render()};$('refreshBtn').onclick=load;
 function csvEscape(v){let s=String(v??'');if(/^[=+@\-\t\r]/.test(s)&&isNaN(Number(s)))s="'"+s;return '"'+s.replace(/"/g,'""')+'"'}
-$('exportBtn').onclick=()=>{let cols=['chequeDate','returnDate','bankDate','party','city','chequeNo','amount','reason','division','mh','inHand','inHandDate','legalRemark','entryDate'],headers=['Return Chq. Date','Chq. Date','Party Name','City','Chq. No.','Chq. Amt','Reason','Division','MH','Entry Date'];let lines=[headers.map(csvEscape).join(','),...filtered().map(r=>cols.map(c=>csvEscape(r[c])).join(','))].join('\r\n');let a=document.createElement('a'),url=URL.createObjectURL(new Blob(['\ufeff'+lines],{type:'text/csv;charset=utf-8;'}));a.href=url;a.download='RAJ_GROUP_'+currentYear()+'_Cheque_Returns.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
+$('exportBtn').onclick=()=>{let cols=['chequeDate','returnDate','bankDate','party','city','chequeNo','amount','reason','division','mh','inHand','inHandDate','legalRemark','entryDate'],headers=['Chq. Date','Return Chq. Date','Bank Date','Party Name','City','Chq. No.','Chq. Amt','Reason','Division','Branch','Cheque Is In Hand','Cheque Is In Hand Date','Legal Remark','Entry Date'];let lines=[headers.map(csvEscape).join(','),...filtered().map(r=>cols.map(c=>csvEscape(r[c])).join(','))].join('\r\n');let a=document.createElement('a'),url=URL.createObjectURL(new Blob(['\ufeff'+lines],{type:'text/csv;charset=utf-8;'}));a.href=url;a.download='RAJ_GROUP_'+currentYear()+'_Cheque_Returns.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
 // Two-or-more words also match even when nonadjacent (e.g. "ag auto" -> A G Auto Parts).
 function masterResults(type,query){let q=norm(query).replace(/[^\p{L}\p{N}]+/gu,' ').trim(),words=q.split(/\s+/).filter(Boolean);let list=masters[type]||[];if(!q)return list.slice(0,35);return list.filter(v=>{let n=norm(v).replace(/[^\p{L}\p{N}]+/gu,' ');return n.includes(q)||words.every(w=>n.split(' ').some(part=>part.startsWith(w)))}).slice(0,55)}
 let opened=null;document.querySelectorAll('[data-master]').forEach(input=>{let popup=document.createElement('div');popup.className='suggest';input.parentNode.appendChild(popup);let active=-1,choices=[];const close=()=>{popup.classList.remove('open');opened=null};const select=i=>{if(!choices[i])return;input.value=choices[i];close();input.dispatchEvent(new Event('change'))};const draw=()=>{choices=masterResults(input.dataset.master,input.value);active=-1;popup.innerHTML=choices.length?choices.map((v,i)=>`<button type="button" data-i="${i}">${sanitize(v)}</button>`).join(''):'<button type="button" disabled>No matching item — add with + Add Dropdown Item</button>';popup.classList.toggle('open',true);opened=close};input.addEventListener('focus',draw);input.addEventListener('input',draw);input.addEventListener('keydown',e=>{if(!popup.classList.contains('open'))return;if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();active=(active+(e.key==='ArrowDown'?1:-1)+choices.length)%Math.max(choices.length,1);Array.from(popup.querySelectorAll('button')).forEach((b,i)=>b.classList.toggle('active',i===active));popup.querySelector('.active')?.scrollIntoView({block:'nearest'})}else if(e.key==='Enter'&&active>=0){e.preventDefault();select(active)}else if(e.key==='Escape')close()});popup.addEventListener('mousedown',e=>{let b=e.target.closest('[data-i]');if(b){e.preventDefault();select(Number(b.dataset.i))}});input.addEventListener('blur',()=>setTimeout(close,150))});
