@@ -6,7 +6,7 @@ const HOSTED=true;
 const GOOGLE_SPREADSHEET_ID = '1MimGbYNBqVbDLOxC7TIVv8IQImNCPkxSgnmjq94NxnQ';
 // IMPORTANT: Spreadsheet edit URL is NOT the Apps Script Web App URL.
 // After deploying Code.gs as a Web App, paste its https://script.google.com/macros/s/.../exec URL here.
-const APPS_SCRIPT_WEB_APP_URL = 'PASTE_YOUR_GOOGLE_APPS_SCRIPT_EXEC_URL_HERE';
+const APPS_SCRIPT_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxPz7JVwEJ6LUanBi5554wJ0amRrGLYlcP6VQgas0YvK1Zditxq-oJvVQwdW1NNT_9t/exec';
 // GitHub frontend -> embedded Google Apps Script bridge -> Sheets/Drive.
 const BRIDGE_CHANNEL='raj-cheque-v5';
 let bridgeFrame=null, bridgeReady=null, bridgeResolve=null;
