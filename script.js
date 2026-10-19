@@ -2,8 +2,8 @@ const DEFAULTS={"party":["A & A Trading Co.patan","A B Auto Parts Padra","A B Mo
 // RAJ GROUP V7 — GitHub Pages static frontend + Google Apps Script data backend.
 // NO login, NO Google-hosted frontend, NO Bridge iframe. Google Sheets stores all records.
 const HOSTED=true;
-// Paste the /exec Web App URL from your NEW Google Apps Script deployment below.
-const APPS_SCRIPT_WEB_APP_URL='PASTE_YOUR_NEW_APPS_SCRIPT_EXEC_URL_HERE';
+// V7 connected to the provided Apps Script Web App URL. Update this only if a NEW deployment URL is created.
+const APPS_SCRIPT_WEB_APP_URL='https://script.google.com/macros/s/AKfycbxH_vkVCCEEoo2eoQhoeb9IK4nTaM3qtUJREYKBQg3MJYRQVIwj6rhrYlEQZlGKUBLm/exec';
 const API_CHANNEL='raj-cheque-gh-v7';
 const API_READ_ACTIONS=new Set(['ping','getBootstrap','getChequePhoto','getStatus']);
 const API_WRITE_ACTIONS=new Set(['initializeDatabase','saveRecord','deleteRecord','addMasterItem']);
