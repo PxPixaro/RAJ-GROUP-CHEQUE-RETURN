@@ -7,3 +7,24 @@
 
 /* V6 */
 .headerdate{display:flex;align-items:center;gap:9px}.headerdate input{background:#fff;border:2px solid #f8c353;border-radius:10px;padding:12px;width:148px;font-weight:800;color:#063987}.field select{width:100%;border:1.5px solid #d8e2f1;background:#fbfdff;border-radius:10px;padding:12px 13px;min-height:45px}.field select:focus{outline:2px solid #2083dd}@media(max-width:710px){.yearbox{flex-wrap:wrap}.headerdate{width:100%}.headerdate input{flex:1}}
+
+/* V7.4 — per-column filter menu and merged cheque-hand entry. */
+.column-filter-btn{border:0;background:transparent;color:inherit;font-size:inherit;font-weight:800;padding:0;display:inline-flex;gap:7px;align-items:center;white-space:nowrap;cursor:pointer;text-align:left}
+.column-filter-btn:hover,.column-filter-btn:focus-visible{color:#ffe17b;outline:0}
+.column-filter-btn:focus-visible{box-shadow:0 2px 0 #ffe17b}
+.column-filter-arrow{font-size:12px;color:#b7d2f8}
+.column-filter-btn.is-active{color:#ffdf6e}
+.column-filter-btn.is-active .column-filter-arrow{color:#ffcf3f}
+.column-filter-panel{position:fixed;z-index:150;width:min(336px,calc(100vw - 24px));max-height:min(455px,75vh);background:#fff;border:1px solid #cad9ec;border-radius:13px;box-shadow:0 22px 52px #173f6b46;color:#213951;display:flex;flex-direction:column;overflow:hidden}
+.column-filter-panel .cf-title{background:#f3f7fd;padding:11px 13px;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:13px;font-weight:800}
+.column-filter-panel .cf-close{border:0;background:transparent;color:#607797;font-size:20px;line-height:1;padding:3px 6px}
+.column-filter-panel .cf-search{display:block;width:calc(100% - 24px);margin:11px 12px 5px;border:1px solid #cbd9e9;padding:10px;border-radius:8px;font-size:13px;outline:0}
+.column-filter-panel .cf-search:focus{border-color:#1683ed}
+.column-filter-panel .cf-options{overflow:auto;overscroll-behavior:contain;min-height:40px;max-height:298px;padding:4px 7px 10px}
+.column-filter-panel .cf-option{display:flex;width:100%;align-items:center;justify-content:space-between;gap:10px;text-align:left;padding:10px;border:0;border-radius:7px;background:#fff;color:#233a57;font-size:13px;word-break:break-word}
+.column-filter-panel .cf-option:hover,.column-filter-panel .cf-option.selected{background:#e7f1ff;color:#0754a3}
+.column-filter-panel .cf-option .cf-count{font-size:11px;color:#7184a0;white-space:nowrap}
+.column-filter-panel .cf-empty{font-size:12px;color:#61748d;padding:15px 10px}
+#clearFiltersBtn[hidden]{display:none!important}
+#columnFilterInfo{color:#1666b1;font-weight:700}
+#chequeInHand{text-transform:none}
